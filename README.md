@@ -26,6 +26,7 @@ The scorer weights a query term more heavily when it appears in fewer reports. T
 
 ## Learning notes and roadmap
 
+- [Complete learning series and interview practice](docs/learning-series.md)
 - [Retrieval, RAG, keyword and semantic search, hybrid search, and chunking](docs/foundations.md)
 - [Vector search, indexes, and databases](docs/vector-search.md)
 - [Planned milestones and evaluation](docs/roadmap.md)
