@@ -2,6 +2,38 @@
 
 These notes expand the concepts introduced so far. Examples and numbers are illustrative; incident reports are fictional. The current project implements only a small keyword-search baseline, not the RAG, vector, chunking, security, or evaluation systems described below. The intended event-log dataset has not yet been inspected.
 
+## Start here: investigate one checkout incident
+
+**Question:** How did the team restore checkout after the payment deployment?
+
+Here is the fictional report we'll use throughout the exercise.
+
+| Section | Report text |
+| --- | --- |
+| Timeline | After the payment deployment, checkout began returning HTTP 500 errors. |
+| Root cause | The payment client was configured to use the wrong endpoint. |
+| Resolution | The team rolled back the payment deployment. Checkout recovered. |
+
+**1. Choose what to search.** We could store the whole report as one searchable item, or store one chunk per section. For this question, a section chunk lets us cite the exact resolution. Keep the incident ID and section name with each chunk so the reader can open the original report. If the resolution merely said “They rolled it back,” include the incident title or fetch the surrounding section so the reader knows what “it” refers to.
+
+**2. Rank the chunks.** Suppose an embedding model gave us the following vectors. These are made-up unit vectors chosen to make the arithmetic easy. The query vector is `[1, 0]`, so its cosine similarity to each chunk equals that chunk's first coordinate.
+
+| Chunk | Toy vector | Similarity |
+| --- | --- | ---: |
+| Timeline | `[0.96, 0.28]` | 0.96 |
+| Resolution | `[0.80, 0.60]` | 0.80 |
+| Root cause | `[0.00, 1.00]` | 0.00 |
+
+Exact search checks all three vectors. With only one result, it returns **Timeline**, which matches the symptoms but omits the fix. With two results, it also finds **Resolution**, which supports the answer: “The team rolled back the payment deployment” (INC-001, Resolution). The higher similarity score belongs to the wrong section for this question.
+
+**3. Decide what to change.** Try retrieving two chunks and reranking them by whether they answer the question. Or test whether adding section headings to the embedded text improves the initial ranking. A keyword query for `HTTP 500` may help find the timeline, but it can be less useful for this particular question about the fix. Compare these options on several questions, including ones about symptoms and root causes, before settling on a design.
+
+**4. Decide whether an index helps.** Exact search over three vectors is straightforward. If the same system grows to a million chunks, an approximate index such as HNSW may reduce search time. If exact search returns Timeline and Resolution but HNSW returns Timeline and Root cause, the index recovered one of the two exact neighbors. In this example it also lost the only chunk that answers the question. Measure both agreement with exact search and retrieval of labeled evidence. Include query latency and memory in the comparison, and apply the same access rules to both methods.
+
+**Try it before reading further:** Change the question to “What error did customers see?” Which section should rank first now? Would the rollback passage be enough to answer? Then ask “Did the rollback take five minutes?” The report gives no duration, so the answer should state that the duration is unknown.
+
+**Interview follow-up:** “The model gave the wrong answer. How would you debug it?” Start by checking whether the resolution chunk was indexed, authorized for the user, and retrieved. If it was retrieved, check whether it made it into the model's context. If it was present, inspect whether the generated answer was supported by that passage. Each failure points to a different part of the system.
+
 ## 1. The problem: finding evidence
 
 A checkout service fails. An engineer asks, “Have we seen a payment configuration failure before?” There may be thousands of incident records. Retrieval finds candidate records to examine. A past incident is evidence of a past event, not proof of the present root cause.
