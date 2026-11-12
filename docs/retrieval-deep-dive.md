@@ -1,38 +1,29 @@
 # Retrieval and RAG: detailed learning notes
 
-These notes expand the concepts introduced so far. Examples and numbers are illustrative; incident reports are fictional. The current project implements only a small keyword-search baseline, not the RAG, vector, chunking, security, or evaluation systems described below. The intended event-log dataset has not yet been inspected.
+These notes expand the concepts introduced so far. Examples and numbers are illustrative; incident reports are fictional. The current project implements only a small keyword-search baseline, not the RAG, vector, chunking, security, or evaluation systems described below. The example below uses verified rows from the intended event-log dataset. Dataset ingestion is still pending.
 
-## Start here: investigate one checkout incident
+## Start here: follow a ticket in our dataset
 
-**Question:** How did the team restore checkout after the payment deployment?
+**Question:** Did ticket `INC0001` reach Level 2 support, and when?
 
-Here is the fictional report we'll use throughout the exercise.
+One CSV row records one event. The same case ID appears on several rows because the ticket moved through several steps. These four rows come from the project's [Incident Management event log](https://github.com/processminingdata/incidentmanagement), which simulates an IT support process. Times are shown as recorded in the CSV.
 
-| Section | Report text |
-| --- | --- |
-| Timeline | After the payment deployment, checkout began returning HTTP 500 errors. |
-| Root cause | The payment client was configured to use the wrong endpoint. |
-| Resolution | The team rolled back the payment deployment. Checkout recovered. |
+| Case ID | Timestamp (17 November 2023) | Event |
+| --- | --- | --- |
+| INC0001 | 11:17 | Ticket created |
+| INC0001 | 13:30 | Ticket assigned to level 1 support |
+| INC0001 | 14:06 | WIP - level 1 support |
+| INC0001 | 16:52 | Level 1 escalates to level 2 support |
 
-**1. Choose what to search.** We could store the whole report as one searchable item, or store one chunk per section. For this question, a section chunk lets us cite the exact resolution. Keep the incident ID and section name with each chunk so the reader can open the original report. If the resolution merely said “They rolled it back,” include the incident title or fetch the surrounding section so the reader knows what “it” refers to.
+**Answer:** Yes. Ticket `INC0001` was escalated to Level 2 at **16:52 on 17 November 2023**, 5 hours and 35 minutes after it was created. The creation and escalation rows support that calculation.
 
-**2. Rank the chunks.** Suppose an embedding model gave us the following vectors. These are made-up unit vectors chosen to make the arithmetic easy. The query vector is `[1, 0]`, so its cosine similarity to each chunk equals that chunk's first coordinate.
+**How we would build it:** Look up rows with `Case ID = INC0001`, sort them by timestamp, and read the escalation row. Filtering and sorting the CSV is enough. If we load it into SQL and frequently look up ticket timelines, an index on case ID and timestamp is an option.
 
-| Chunk | Toy vector | Similarity |
-| --- | --- | ---: |
-| Timeline | `[0.96, 0.28]` | 0.96 |
-| Resolution | `[0.80, 0.60]` | 0.80 |
-| Root cause | `[0.00, 1.00]` | 0.00 |
+**Where chunking fits:** If we later add search by meaning, a short timeline like this could be one searchable chunk with the case ID attached. Splitting each event into its own chunk could make the system retrieve the escalation but miss the creation time needed to calculate the elapsed time.
 
-Exact search checks all three vectors. With only one result, it returns **Timeline**, which matches the symptoms but omits the fix. With two results, it also finds **Resolution**, which supports the answer: “The team rolled back the payment deployment” (INC-001, Resolution). The higher similarity score belongs to the wrong section for this question.
+**Where vector search fits:** A question such as “Find incidents similar to an application that keeps crashing” could benefit from semantic search over descriptions if exact keyword matching misses relevant wording. An exact ticket ID or recorded timestamp is better served by a structured lookup. Start with the structured lookup, then compare retrieval methods on questions that actually need them.
 
-**3. Decide what to change.** Try retrieving two chunks and reranking them by whether they answer the question. Or test whether adding section headings to the embedded text improves the initial ranking. A keyword query for `HTTP 500` may help find the timeline, but it can be less useful for this particular question about the fix. Compare these options on several questions, including ones about symptoms and root causes, before settling on a design.
-
-**4. Decide whether an index helps.** Exact search over three vectors is straightforward. If the same system grows to a million chunks, an approximate index such as HNSW may reduce search time. If exact search returns Timeline and Resolution but HNSW returns Timeline and Root cause, the index recovered one of the two exact neighbors. In this example it also lost the only chunk that answers the question. Measure both agreement with exact search and retrieval of labeled evidence. Include query latency and memory in the comparison, and apply the same access rules to both methods.
-
-**Try it before reading further:** Change the question to “What error did customers see?” Which section should rank first now? Would the rollback passage be enough to answer? Then ask “Did the rollback take five minutes?” The report gives no duration, so the answer should state that the duration is unknown.
-
-**Interview follow-up:** “The model gave the wrong answer. How would you debug it?” Start by checking whether the resolution chunk was indexed, authorized for the user, and retrieved. If it was retrieved, check whether it made it into the model's context. If it was present, inspect whether the generated answer was supported by that passage. Each failure points to a different part of the system.
+**Interview question:** Why use a structured query here? The case ID, timestamp and event are already explicit fields. A structured query returns the source rows and lets us calculate elapsed time directly. The short description says “Application crash.” Those rows support the ticket timeline, with no evidence about the crash's technical cause.
 
 ## 1. The problem: finding evidence
 
@@ -133,65 +124,6 @@ An approximate nearest neighbor (ANN) index organizes vectors to search faster w
 
 For a tiny toy corpus, start with exact comparison if embeddings are actually needed. For a large corpus, benchmark alternatives under the expected workload. For ANN quality, compare its top-k neighbors to exact search using the same vectors and metric. Separately measure whether the retrieved evidence is relevant to users: matching the exact vector ranking perfectly does not prove that the embedding model understood the task.
 
-## Runnable lab: from incident report to ranked evidence
-
-Copy this into a Python file and run it with Python 3. Each dictionary entry is one heading-based chunk from incident INC-001. The vectors are hand-written so you can reproduce every calculation without an embedding model.
-
-```python
-from math import sqrt
-
-report = {
-    "Timeline": "Checkout returned HTTP 500 after deployment.",
-    "Root cause": "The payment client used the wrong endpoint.",
-    "Resolution": "The team rolled back the payment deployment.",
-}
-vectors = {
-    "Timeline": (0.96, 0.28),
-    "Root cause": (0.00, 1.00),
-    "Resolution": (0.80, 0.60),
-}
-query = (1.0, 0.0)
-
-def cosine(a, b):
-    dot = sum(x * y for x, y in zip(a, b))
-    return dot / (sqrt(sum(x*x for x in a)) * sqrt(sum(y*y for y in b)))
-
-ranked = sorted(report, key=lambda section: cosine(query, vectors[section]),
-                reverse=True)
-for k in (1, 2):
-    top = ranked[:k]
-    recall = int("Resolution" in top)
-    print(f"k={k}: {top}, evidence recall={recall}")
-    for section in top:
-        print(f"  INC-001 / {section}: {report[section]}")
-```
-
-```text
-k=1: ['Timeline'], evidence recall=0
-  INC-001 / Timeline: Checkout returned HTTP 500 after deployment.
-k=2: ['Timeline', 'Resolution'], evidence recall=1
-  INC-001 / Timeline: Checkout returned HTTP 500 after deployment.
-  INC-001 / Resolution: The team rolled back the payment deployment.
-```
-
-1. The **report** gives us three searchable passages. Each heading identifies the type of evidence. In a real index, use a stable key such as `INC-001#resolution` and record the document version and access policy alongside it.
-2. The **vectors** stand in for embedding model output. `cosine()` multiplies corresponding coordinates, adds the products, and divides by the two vector lengths. For Resolution, that is `(1 × 0.8 + 0 × 0.6) / (1 × 1) = 0.8`.
-3. **Sorting** checks all three vectors and ranks them by cosine similarity. The symptom passage wins because of the assigned vector, although it has no evidence about how checkout recovered. This is a ranking problem even with exact search.
-4. **Taking the first k** controls what reaches the next stage. At k=2 the one labeled relevant chunk is present, so evidence recall is 1/1. Precision is 1/2 if Timeline is labeled irrelevant to the fix. A reranker can prioritize Resolution among the retrieved candidates, but cannot recover it from a candidate list that excludes it.
-5. **Answering with evidence** comes after retrieval. A supported answer is “The team rolled back the payment deployment” with a citation to Resolution. For “How many minutes did recovery take?”, none of the chunks supports a duration.
-
-**Try two changes.** Set `query = (0.0, 1.0)` and predict the ranking before running it. The toy query now puts Root cause first. Then change Resolution to “They rolled it back.” Rerun the code: the rank stays the same because the vectors are fixed, but the evidence is harder to interpret. In a real system you would re-embed the edited text and evaluate the impact on both ranking and answer quality.
-
-### How the same example scales
-
-With one million vectors of 768 dimensions stored as 32-bit floats, the raw vector data alone needs `1,000,000 × 768 × 4 = 3.072 GB` in decimal units. Budget separately for graph links, metadata, text, and replicas. An exact scan computes scores against every eligible vector. It may still be practical when an access or service filter leaves only a small candidate set.
-
-With HNSW, search starts in an upper graph layer with fewer nodes and follows links toward closer vectors. It moves down through denser layers and explores more candidates near the query. Three settings give you different controls. `M` controls graph connectivity and affects memory. `efConstruction` controls how broadly the graph builder looks for neighbors, trading build time for graph quality. `efSearch` controls how broadly each query explores, trading latency for neighbor recall. Sweep query settings against a fixed index before deciding whether to rebuild with different construction settings. [Original HNSW paper](https://arxiv.org/abs/1603.09320) · [FAISS index reference](https://github.com/facebookresearch/faiss/wiki/Faiss-indexes)
-
-**Compare the alternatives.** Use exact search as the reference. Compare HNSW with a flat scan and, if memory is the bottleneck, consider an inverted file index with vector compression. Measure neighbor recall against exact search, evidence recall against human labels, p95 latency under expected concurrency, memory, and build time. Run the comparison with representative access filters: if the index searches broadly and then filters out unauthorized results, few eligible candidates may remain. Authorization must happen before any retrieved text reaches the model. A highly selective filter may favor exact search within the permitted subset.
-
-**Interview question:** “At k=2 the exact index returns Timeline and Resolution. ANN returns Timeline and Root cause. What failed?” ANN neighbor recall is 1/2, and evidence recall for this question is 0/1. Compare exact and ANN on the same authorized corpus first. If exact also misses the evidence, investigate chunking, embeddings, or ranking before tuning the ANN index.
-
 ## 8. Measuring retrieval and answers
 
 Build a small labeled set of representative questions, permitted documents, relevant evidence and no-answer cases. Include exact error codes, synonyms, stale documents and permission boundaries. Split development examples from a held-out test set to reduce overfitting. Avoid claiming strong performance from a handful of easy synthetic examples.
@@ -223,4 +155,4 @@ Relevance labels are incomplete or subjective in many real datasets; report how 
 
 ## 10. Project status and next step
 
-The repository currently contains a keyword baseline on four fictional reports. It does not yet implement embeddings, chunks, a vector index, RAG, authentication, or evaluation. Next, inspect the intended [Incident Management event log](https://github.com/processminingdata/incidentmanagement), its fields, sample rows, provenance and license. Decide which questions the actual data supports before choosing structured analysis, document retrieval or both.
+The repository currently contains a keyword baseline on four fictional reports. It does not yet implement embeddings, chunks, a vector index, RAG, authentication, or evaluation. Next, continue inspecting the [Incident Management event log](https://github.com/processminingdata/incidentmanagement), its fields, sample rows, provenance and license. Decide which questions the actual data supports before choosing structured analysis, document retrieval or both.
