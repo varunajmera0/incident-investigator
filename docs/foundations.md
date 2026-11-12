@@ -1,5 +1,7 @@
 # What we have studied: retrieval and RAG foundations
 
+For worked examples, trade-offs, evaluation, and interview answers, see [the detailed retrieval and RAG lessons](retrieval-deep-dive.md).
+
 These are introductory learning notes, not a claim of mastery or completed implementation. Incident examples are fictional. The project currently implements only a small keyword-search demonstration; the event-log dataset has not yet been inspected or integrated.
 
 ## 1. Retrieval and evidence
