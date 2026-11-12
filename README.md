@@ -29,7 +29,7 @@ The scorer weights a query term more heavily when it appears in fewer reports. T
 - [Retrieval, RAG, keyword and semantic search, hybrid search, and chunking](docs/foundations.md)
 - [Planned milestones and evaluation](docs/roadmap.md)
 
-The reports are fictional, created for this project. No public incident dataset is included yet. Future datasets will be attributed and their licenses reviewed before inclusion.
+The reports are fictional, created for this project. The intended main dataset is the [Incident Management event log](https://github.com/processminingdata/incidentmanagement), which has not yet been inspected or integrated. We will inspect its schema and document its provenance and license before use or redistribution.
 
 ## Limitations and security
 
