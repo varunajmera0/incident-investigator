@@ -27,6 +27,7 @@ The scorer weights a query term more heavily when it appears in fewer reports. T
 ## Learning notes and roadmap
 
 - [Retrieval, RAG, keyword and semantic search, hybrid search, and chunking](docs/foundations.md)
+- [Vector search, indexes, and databases](docs/vector-search.md)
 - [Planned milestones and evaluation](docs/roadmap.md)
 
 The reports are fictional, created for this project. The intended main dataset is the [Incident Management event log](https://github.com/processminingdata/incidentmanagement), which has not yet been inspected or integrated. We will inspect its schema and document its provenance and license before use or redistribution.
